@@ -2,83 +2,132 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 import Bottleneck from "bottleneck";
 import fetch from 'node-fetch';
+import { Response } from 'node-fetch';
 
 dotenv.config()
 
-const blockNumber = 14405659
+const blockNumber = 14427977
 
 let webhook = process.env.WEBHOOK
+let etherscanAPI = process.env.ETHERSCAN
+
+const limiter = new Bottleneck({
+    maxConcurrent: 1,
+    minTime: 500
+});
 
 const pollApi = async function (blockNumber) {
 
     console.log(blockNumber)
+    let apiQueries = []
+    apiQueries.push(fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x5C6374a2ac4EBC38DeA0Fc1F8716e5Ea1AdD94dd&startblock=${blockNumber}&endblock=99999999&page=1&offset=200&sort=desc&apikey=${etherscanAPI}`))
+    apiQueries.push(fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x062Bf725dC4cDF947aa79Ca2aaCCD4F385b13b5c&startblock=${blockNumber}&endblock=99999999&page=1&offset=200&sort=desc&apikey=${etherscanAPI}`))
 
-    await fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x5C6374a2ac4EBC38DeA0Fc1F8716e5Ea1AdD94dd&startblock=${blockNumber}&endblock=99999999&page=1&offset=200&sort=desc&apikey=YourApiKeyToken`)
-        .then(r => r.json())
+    await Promise.all(apiQueries)
         .then(res => {
-            if (res.status == 0) {
-                console.log(res.message)
-                setTimeout(function () {
-                    pollApi(blockNumber);
-                }, 600000);
-            }
-            else if (res.status) {
-                blockNumber = Number(res.result[0].blockNumber) + 1
-                for (let i = 0; i < res.result.length; i++) {
-                    console.log('new tx: ', res.result[i].hash)
-                    parseTx(res.result[i])
-                    
-                }
-                setTimeout(function () {
-                    pollApi(blockNumber);
-                }, 60000);
-            }
+            processResponse(res, blockNumber)
         })
-    // console.log(blockNumber)
 }
 
-const parseTx = async function (tx) {
-
-    let type = tx.input.slice(0, 10)
-    console.log(type)
-    
-    // console.log(tx)
-    if (type == "0xbdfa9bae") {
-        console.log("DEPOSIT")
-        console.log(`https://etherscan.io/tx/${tx.hash}`)
-        pingWebhook(tx)
-    } else if (type == "0x94bf804d") {
-        console.log("MINT")
-        console.log(`https://etherscan.io/tx/${tx.hash}`)
-        pingWebhook(tx)
+const processResponse = async function (something, blockNumber) {
+    let resArray = []
+    let blockNumbers = []
+    for (let i = 0; i < something.length; i++) {
+        await something[i].json()
+            .then(r => {
+                // console.log(r.result.length);
+                resArray.push(r.result)
+                // console.log(r.result);
+                // for (let i = 0; i < r.result; i++) {
+                //     console.log(r.result[i])
+                // }
+            })
     }
+    for (let i = 0; i < resArray.length; i++) {
+        // console.log('res:',resArray[i])
+
+        let thisArray = resArray[i]
+        for (let i = 0; i < thisArray.length; i++) {
+            limiter.schedule(() => {
+                pingWebhook(thisArray[i])
+            })
+            blockNumbers.push(Number(thisArray[i].blockNumber))
+        }
+    }
+    // console.log('BlockNumbers: ', blockNumbers)
+
+    if (!blockNumbers.length) {
+        // console.log('calling with blockNumber: ', blockNumber)
+        setTimeout(function () {
+            pollApi(blockNumber);
+        }, 6000);
+    } else {
+        blockNumber = Math.max(...blockNumbers)
+        // console.log('calling with blockNumber: ', blockNumber)
+        setTimeout(function () {
+            pollApi(blockNumber+1);
+        }, 6000);
+    }
+
+
 }
 
 const pingWebhook = async function (tx) {
 
+    let contract;
+    let type;
+
+    let input = tx.input.slice(0, 10)
+    // console.log(`https://etherscan.io/tx/${tx.hash}`)
+
+    if (input == "0xbdfa9bae") {
+        type = "deposit";
+    } else if (input == "0x94bf804d") {
+        type = "mint"
+    } else if (input == "0x0710285c") {
+        type = "self-liquidation"
+    }
+
+    if (tx.to.slice(-4,) == "3b5c") {
+        contract = "alETH"
+    } else if (tx.to.slice(-4,) == "94dd") {
+        contract = "alUSD"
+    }
+
     let payload = {
-        "username": "ZZ Whale Watcher",
+        "username": "Alchemix v2 Watcher",
         "content": "",
         "embeds": [
             {
                 "author": {
-                    "name": "ZigZag Exchange",
-                    "url": "https://trade.zigzag.exchange/"
+                    "name": "Alchemix Discord Bot",
+                    "url": "https://alchemix.fi/"
                 },
-                "title": `ALCX Thing Happened`,
-                "url": `https://etherscan.io/tx/${tx.hash}`,
+                "title": `New ${type} from ${tx.from}`,
+                "url": `https://etherscan.io/address/${tx.from}`,
 
                 "color": 65310,
                 "fields": [
                     {
-                        "name": `test`,
-                        "value": `stuff`,
+                        "name": `Contract`,
+                        "value": `${contract}`,
                         "inline": true
+                    },
+                    {
+                        "name": "Transaction",
+                        "value": `https://etherscan.io/tx/${tx.hash}`,
+                        "inline": true
+                    },
+                    {
+                        "name": "Block",
+                        "value": `${tx.blockNumber}`,
+                        "inline": true
+
                     }
-                    
+
                 ],
                 "footer": {
-                    "text": "Made by @DefiBuilderETH, powered by ZigZag",
+                    "text": "Made by @DefiBuilderETH, powered by Etherscan",
                     "icon_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Twitter-logo.svg/1200px-Twitter-logo.svg.png"
                 }
             }
