@@ -4,7 +4,10 @@ import Bottleneck from "bottleneck";
 import fetch from 'node-fetch';
 
 dotenv.config()
-let relevantBlocks = [14426565, 14422663, 14429587, 14420816, 14425617]
+
+let blockNumber = 14432274
+let intervalSecs = 600
+
 
 // let relevantBlocks = [14426565, 14422663, 14417872, 14430077, 14419078, 14429587, 14429644, 14429614, 14420816, 14387583, 14411231, 14425617, 14429594, 14376257]
 let validTokens = [{ address: "0x7da96a3891add058ada2e826306d812c638d87a7", token: "USDT", decimals: 6 }, { address: "0xda816459f1ab5631232fe5e97a05bbbb94970c95", token: "DAI", decimals: 18 }, { address: "0xa354f35829ae975e850e23e9615b11da1b3dc4de", token: 'USDC', decimals: 6 }, { address: "0xa258c4606ca8206d8aa700ce2143d7db854d168c", token: "WETH", decimals: 18 }]
@@ -50,21 +53,20 @@ const processResponse = async function (something, blockNumber) {
         }
     }
 
-    // if (!blockNumbers.length) {
-    //     setTimeout(function () {
-    //         pollApi(blockNumber);
-    //     }, 6000);
-    // } else {
-    //     blockNumber = Math.max(...blockNumbers)
-    //     setTimeout(function () {
-    //         pollApi(blockNumber + 1);
-    //     }, 6000);
-    // }
+    if (!blockNumbers.length) {
+        setTimeout(function () {
+            pollApi(blockNumber);
+        }, intervalSecs*1000);
+    } else {
+        blockNumber = Math.max(...blockNumbers)
+        setTimeout(function () {
+            pollApi(blockNumber + 1);
+        }, intervalSecs*1000);
+    }
 }
 
 const pingWebhook = async function (tx) {
 
-    // console.log(tx)
     let payload;
 
     let type;
@@ -75,47 +77,49 @@ const pingWebhook = async function (tx) {
 
     let input = tx.input.slice(0, 10)
 
-    // console.log(input)
-
     if (input == "0xbdfa9bae" || input == "0xf45346dc") {
         type = "deposit";
         tokenAddress = '0x' + tx.input.slice(34, 74)
         for (let i = 0; i < validTokens.length; i++) {
             if (validTokens[i].address == tokenAddress) {
                 token = validTokens[i].token
-                console.log(token)
                 decimals = validTokens[i].decimals
-                console.log(decimals)
             }
         }
-        // console.log(tx.input.slice(112,138))
         amount = parseInt(tx.input.slice(112, 138), 16) * 10 ** -decimals
-        console.log(amount)
-
     } else if (input == "0x94bf804d") {
         type = "mint"
         amount = parseInt(tx.input.slice(40, 74), 16) * 10 ** -18
+        if (tx.to == '0x062bf725dc4cdf947aa79ca2aaccd4f385b13b5c') {
+            token = 'alETH'
+        } else if (tx.to == '0x5c6374a2ac4ebc38dea0fc1f8716e5ea1add94dd') {
+            token = 'alUSD'
+        } else {
+            console.log('no match')
+        }
+
     } else if (input == "0x0710285c") {
         type = "self-liquidation"
-        amount = parseInt(tx.input.slice(-16,), 16)
+        tokenAddress = '0x' + tx.input.slice(34, 74)
+        for (let i = 0; i < validTokens.length; i++) {
+            if (validTokens[i].address == tokenAddress) {
+                token = validTokens[i].token
+                decimals = validTokens[i].decimals
+            }
+        }
+        amount = parseInt(tx.input.slice(110, 138), 16) * 10 ** -decimals
+        console.log(amount)
     } else if (input == "0xa6459a32") {
         type = "withdrawal"
         tokenAddress = '0x' + tx.input.slice(34, 74)
         for (let i = 0; i < validTokens.length; i++) {
             if (validTokens[i].address == tokenAddress) {
                 token = validTokens[i].token
+                decimals = validTokens[i].decimals
             }
         }
-        amount = parseInt(tx.input.slice(-16,), 16)
+        amount = parseInt(tx.input.slice(-23,), 16) * 10 ** -decimals
     }
-
-    // console.log(type)
-
-    // if (tx.to == '0x062Bf725dC4cDF947aa79Ca2aaCCD4F385b13b5c') {
-    //     token = 'alETH'
-    // } else if (tx.to == '0x062Bf725dC4cDF947aa79Ca2aaCCD4F385b13b5c') {
-    //     token = 'alUSD but also USDC/DAI/USDT..'
-    // }
 
     payload = {
         "username": "Alchemix v2 Watcher",
@@ -131,14 +135,14 @@ const pingWebhook = async function (tx) {
 
                 "color": 65310,
                 "fields": [
-                    // {
-                    //     "name": `Token`,
-                    //     "value": `${token}`,
-                    //     "inline": true
-                    // },
+                    {
+                        "name": `Token`,
+                        "value": `${token}`,
+                        "inline": true
+                    },
                     {
                         "name": "Amount",
-                        "value": `${amount.toLocaleString(undefined, {maximumFractionDigits: 2})} ${token}`,
+                        "value": `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
                         "inline": true
                     },
                     {
@@ -155,7 +159,6 @@ const pingWebhook = async function (tx) {
         ]
     }
 
-
     axios
         .post(webhook, payload)
         .then(res => {
@@ -171,15 +174,12 @@ const pingWebhook = async function (tx) {
 //     await sleep(5000);
 // }
 
-pollApi(14420816)
+// function sleep(ms) {
+//     return new Promise((resolve) => {
+//         setTimeout(resolve, ms);
+//     });
+// }
 
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
-
-// setTimeout(function () {
-//     pollApi(blockNumber);
-// }, 1000);
+setTimeout(function () {
+    pollApi(blockNumber);
+}, 1000);
