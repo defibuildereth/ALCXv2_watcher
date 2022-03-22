@@ -5,8 +5,8 @@ import fetch from 'node-fetch';
 
 dotenv.config()
 
-let blockNumber = 14432274
-let intervalSecs = 600
+let intervalSecs = 120
+
 
 
 // let relevantBlocks = [14426565, 14422663, 14417872, 14430077, 14419078, 14429587, 14429644, 14429614, 14420816, 14387583, 14411231, 14425617, 14429594, 14376257]
@@ -17,15 +17,26 @@ let etherscanAPI = process.env.ETHERSCAN
 
 const discord_webhook = new Bottleneck({
     maxConcurrent: 1,
-    minTime: 5000
+    minTime: 2000
 });
+
+let timestamp = Math.round((Date.now()/1000)-(1*86400))
+let getCurrentBlock = async function (timestamp) {
+    // console.log(timestamp)
+    await fetch(`https://api.etherscan.io/api?module=block&action=getblocknobytime&timestamp=${timestamp}&closest=before&apikey=${etherscanAPI}`)
+    .then(r => r.json())
+    .then(res => {
+        pollApi(res.result)
+    })
+}
+// let blockNumber = 14436205 
 
 const pollApi = async function (blockNumber) {
 
     console.log(blockNumber)
     let apiQueries = []
-    apiQueries.push(fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x5C6374a2ac4EBC38DeA0Fc1F8716e5Ea1AdD94dd&startblock=${blockNumber}&endblock=${blockNumber + 1}&page=1&offset=200&sort=desc&apikey=${etherscanAPI}`))
-    apiQueries.push(fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x062Bf725dC4cDF947aa79Ca2aaCCD4F385b13b5c&startblock=${blockNumber}&endblock=${blockNumber + 1}&page=1&offset=200&sort=desc&apikey=${etherscanAPI}`))
+    apiQueries.push(fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x5C6374a2ac4EBC38DeA0Fc1F8716e5Ea1AdD94dd&startblock=${blockNumber}&endblock=9999999999&page=1&offset=200&sort=desc&apikey=${etherscanAPI}`))
+    apiQueries.push(fetch(`https://api.etherscan.io/api?module=account&action=txlist&address=0x062Bf725dC4cDF947aa79Ca2aaCCD4F385b13b5c&startblock=${blockNumber}&endblock=9999999999&page=1&offset=200&sort=desc&apikey=${etherscanAPI}`))
 
     await Promise.all(apiQueries)
         .then(res => {
@@ -56,16 +67,18 @@ const processResponse = async function (something, blockNumber) {
     if (!blockNumbers.length) {
         setTimeout(function () {
             pollApi(blockNumber);
-        }, intervalSecs*1000);
+        }, intervalSecs * 1000);
     } else {
         blockNumber = Math.max(...blockNumbers)
         setTimeout(function () {
             pollApi(blockNumber + 1);
-        }, intervalSecs*1000);
+        }, intervalSecs * 1000);
     }
 }
 
 const pingWebhook = async function (tx) {
+
+    // console.log(tx)
 
     let payload;
 
@@ -78,6 +91,7 @@ const pingWebhook = async function (tx) {
     let input = tx.input.slice(0, 10)
 
     if (input == "0xbdfa9bae" || input == "0xf45346dc") {
+
         type = "deposit";
         tokenAddress = '0x' + tx.input.slice(34, 74)
         for (let i = 0; i < validTokens.length; i++) {
@@ -87,6 +101,7 @@ const pingWebhook = async function (tx) {
             }
         }
         amount = parseInt(tx.input.slice(112, 138), 16) * 10 ** -decimals
+
     } else if (input == "0x94bf804d") {
         type = "mint"
         amount = parseInt(tx.input.slice(40, 74), 16) * 10 ** -18
@@ -108,7 +123,7 @@ const pingWebhook = async function (tx) {
             }
         }
         amount = parseInt(tx.input.slice(110, 138), 16) * 10 ** -decimals
-        console.log(amount)
+
     } else if (input == "0xa6459a32") {
         type = "withdrawal"
         tokenAddress = '0x' + tx.input.slice(34, 74)
@@ -119,6 +134,22 @@ const pingWebhook = async function (tx) {
             }
         }
         amount = parseInt(tx.input.slice(-23,), 16) * 10 ** -decimals
+
+    } else if (input == "0x69328dec") {
+        type = 'withdrawal'
+        tokenAddress = '0x' + tx.input.slice(34, 74)
+        for (let i = 0; i < validTokens.length; i++) {
+            if (validTokens[i].address == tokenAddress) {
+                token = validTokens[i].token
+                decimals = validTokens[i].decimals
+            }
+        }
+        amount = parseInt(tx.input.slice(110, 138), 16) * 10 ** -decimals
+        // console.log(amount)
+
+    } else {
+        console.log(tx)
+        return
     }
 
     payload = {
@@ -180,6 +211,8 @@ const pingWebhook = async function (tx) {
 //     });
 // }
 
-setTimeout(function () {
-    pollApi(blockNumber);
-}, 1000);
+// setTimeout(function () {
+//     pollApi(blockNumber);
+// }, 1000);
+
+getCurrentBlock(timestamp)
